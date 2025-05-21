@@ -260,3 +260,28 @@ def _draw_simulation_areas(self):
                  'end_x': x_end,
                  'end_y': y_pos + core_box_height
              })
+
+    def tambah_process(self):
+        """Adds a new process from the input fields."""
+        if self.simulation_running:
+             messagebox.showwarning("Warning", "Cannot add processes during simulation.")
+             return
+        try:
+            arrival_time = int(self.arrival_time_entry.get())
+            burst_time = int(self.burst_time_entry.get())
+            if arrival_time < 0 or burst_time <= 0:
+                raise ValueError("Arrival time must be >= 0 and Burst time must be > 0.")
+
+            self.process_counter += 1
+            new_process = Process(self.process_counter, arrival_time, burst_time, self.canvas, self._get_next_color())
+            self.processes.append(new_process)
+            self.process_listbox.insert(tk.END, repr(new_process))
+
+            self.arrival_time_entry.delete(0, tk.END)
+            self.arrival_time_entry.insert(0, str(arrival_time + 1))
+            self.burst_time_entry.delete(0, tk.END)
+            self.burst_time_entry.insert(0, str(random.randint(3, 8))) # Suggest
+
+
+        except ValueError as e:
+            messagebox.showerror("Input Error", f"Invalid input: {e}")
