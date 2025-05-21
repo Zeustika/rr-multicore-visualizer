@@ -285,3 +285,200 @@ def _draw_simulation_areas(self):
 
         except ValueError as e:
             messagebox.showerror("Input Error", f"Invalid input: {e}")
+    
+    def update_speed(self, val):
+        """Updates the animation speed factor from the scale."""
+        self.animation_speed_factor = float(val)
+
+    def get_delay(self):
+        """Calculates the actual delay based on speed factor."""
+        return int(ANIMATION_STEP_DELAY_MS * self.animation_speed_factor)
+
+    def toggle_pause(self):
+        """Pauses or resumes the simulation."""
+        if not self.simulation_running:
+            return
+        self.simulation_paused = not self.simulation_paused
+        if self.simulation_paused:
+            self.pause_button.config(text="Resume")
+        else:
+            self.pause_button.config(text="Pause")
+            self.simulation_step()
+
+    def reset_simulation(self):
+        """Resets the simulation state and GUI."""
+        if hasattr(self, 'animation_id') and self.animation_id:
+            self.master.after_cancel(self.animation_id) # Stop
+
+        for p in self.processes:
+            p.destroy_visual()
+        self.processes = []
+        self.ready_queue.clear()
+        self.terminated_processes = []
+        self.gantt_data = []
+        self.cores = [] # Will
+
+        self.current_time = 0
+        self.simulation_running = False
+        self.simulation_paused = False
+        self.process_counter = 0
+        self.color_index = 0
+
+        self.time_label.config(text="Time: 0")
+        self.process_listbox.delete(0, tk.END)
+        self.canvas.delete("process") # Clear
+        self.canvas.delete("gantt")   # Clear
+        self.results_label.config(text="Waiting for simulation end...")
+        self.start_button.config(state=tk.NORMAL)
+        self.add_process_button.config(state=tk.NORMAL)
+        self.pause_button.config(text="Pause", state=tk.DISABLED)
+        self.num_cores_spinbox.config(state=tk.NORMAL)
+        self.time_quantum_spinbox.config(state=tk.NORMAL)
+
+        self._draw_simulation_areas()
+        self._update_core_display() # Redraw
+
+    def start_simulation(self):
+        """Starts the scheduling simulation."""
+        if not self.processes:
+            messagebox.showwarning("No Processes", "Please add at least one process.")
+            return
+        if self.simulation_running:
+             messagebox.showwarning("Running", "Simulation is already running. Reset first.")
+             return
+
+        try:
+            self.time_quantum = int(self.time_quantum_spinbox.get())
+            self.num_cores = int(self.num_cores_spinbox.get()) # Ensure
+            if self.time_quantum <= 0:
+                raise ValueError("Time quantum must be positive.")
+        except ValueError as e:
+            messagebox.showerror("Input Error", f"Invalid simulation parameters: {e}")
+            return
+
+        self.simulation_running = True
+        self.simulation_paused = False
+
+        self.processes.sort(key=lambda p: p.arrival_time) # Sort
+        self.terminated_processes = []
+        self.ready_queue.clear()
+        self.gantt_data = []
+        self.current_time = 0
+        self.time_label.config(text="Time: 0")
+        self.results_label.config(text="Simulation running...")
+
+        initial_x = 50
+        initial_y = QUEUE_AREA_Y_START - 30 # Position
+        for p in self.processes:
+            p.remaining_burst_time = p.burst_time
+            p.start_time = -1
+            p.completion_time = -1
+            p.waiting_time = 0
+            p.turnaround_time = 0
+            p.state = "New"
+            p.current_core = None
+            p.time_on_core_current_quantum = 0
+            p.destroy_visual() # Clear
+
+        for core in self.cores:
+            core['state'] = 'Idle'
+            core['process'] = None
+            self.canvas.itemconfig(core['visual_id'], fill="lightblue")
+
+        self.start_button.config(state=tk.DISABLED)
+        self.add_process_button.config(state=tk.DISABLED)
+        self.pause_button.config(state=tk.NORMAL)
+        self.num_cores_spinbox.config(state=tk.DISABLED)
+        self.time_quantum_spinbox.config(state=tk.DISABLED)
+
+        self.animation_queue = collections.deque() # Queue
+        self.simulation_step()
+
+
+    def _get_queue_position(self, index):
+        """Calculates the visual position for a process in the ready queue."""
+        x = 50 + (index * (PROCESS_RADIUS * 2 + 10))
+        y = QUEUE_AREA_Y_START + QUEUE_AREA_HEIGHT / 2
+        max_per_row = (CANVAS_WIDTH - 100) // (PROCESS_RADIUS * 2 + 10)
+        row = index // max_per_row
+        col = index % max_per_row
+        x = 50 + (col * (PROCESS_RADIUS * 2 + 10))
+        y = QUEUE_AREA_Y_START + 30 + (row * (PROCESS_RADIUS * 2 + 10))
+        return x, y
+
+    def _animate_move(self, process, target_x, target_y, steps=ANIMATION_MOVE_STEPS, callback=None):
+        """Animates the movement of a process visual smoothly."""
+        if not process.visual_id: # Process
+            if callback: callback()
+            return
+
+        start_x, start_y = process.current_x, process.current_y
+        dx = (target_x - start_x) / steps
+        dy = (target_y - start_y) / steps
+        process.target_x = target_x
+        process.target_y = target_y
+
+        def step_move(current_step):
+            if self.simulation_paused:
+                self.animation_id = self.master.after(100, lambda: step_move(current_step))
+                return
+
+            if not process.visual_id:
+                if callback: callback()
+                return
+
+            if current_step < steps:
+                if process.target_x != target_x or process.target_y != target_y:
+                    print(f"P{process.id} target changed during move, stopping.")
+                    if callback: callback()
+                    return
+
+                process.move_visual(dx, dy)
+                self.animation_id = self.master.after(max(10, self.get_delay() // steps), lambda: step_move(current_step + 1))
+            else:
+                process.set_position(target_x, target_y)
+                if callback:
+                    callback()
+
+        step_move(0)
+
+
+    def _update_ready_queue_visuals(self, animated_process=None, target_x=None, target_y=None, callback=None):
+        """Rearranges visuals in the ready queue area."""
+        q_idx = 0
+        processes_to_animate = []
+
+        processes_in_queue_area = []
+        for p in self.processes:
+            if p.visual_id and p.state == "Ready":
+                 if QUEUE_AREA_Y_START < p.current_y < QUEUE_AREA_Y_START + QUEUE_AREA_HEIGHT + PROCESS_RADIUS*2:
+                     processes_in_queue_area.append(p)
+
+        processes_in_queue_area.sort(key=lambda p: p.current_x)
+
+        for p in processes_in_queue_area:
+             if p == animated_process and target_x is not None:
+                  continue
+             target_q_x, target_q_y = self._get_queue_position(q_idx)
+             if abs(p.current_x - target_q_x) > 1 or abs(p.current_y - target_q_y) > 1:
+                 processes_to_animate.append({'process': p, 'target_x': target_q_x, 'target_y': target_q_y})
+             q_idx += 1
+        if animated_process and target_x is not None:
+             final_q_x, final_q_y = self._get_queue_position(q_idx)
+             processes_to_animate.append({'process': animated_process, 'target_x': final_q_x, 'target_y': final_q_y})
+
+
+        if not processes_to_animate:
+            if callback: callback()
+            return
+
+        remaining_animations = len(processes_to_animate)
+
+        def on_single_animation_done():
+            nonlocal remaining_animations
+            remaining_animations -= 1
+            if remaining_animations == 0 and callback:
+                callback()
+
+        for anim_info in processes_to_animate:
+            self._animate_move(anim_info['process'], anim_info['target_x'], anim_info['target_y'], steps=max(3, ANIMATION_MOVE_STEPS // 2), callback=on_single_animation_done)
