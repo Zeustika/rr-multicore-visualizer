@@ -484,4 +484,172 @@ def _draw_simulation_areas(self):
             self._animate_move(anim_info['process'], anim_info['target_x'], anim_info['target_y'], steps=max(3, ANIMATION_MOVE_STEPS // 2), callback=on_single_animation_done)
 
 
-   
+
+    def simulation_step(self):
+        """Performs one time unit step of the simulation."""
+        if not self.simulation_running:
+            return
+
+        if self.simulation_paused:
+            self.animation_id = self.master.after(200, self.simulation_step)
+            return
+
+        current_step_actions = []
+
+        newly_arrived = []
+        for process in self.processes:
+            if process.state == "New" and process.arrival_time <= self.current_time:
+                process.state = "Ready"
+                self.ready_queue.append(process)
+                newly_arrived.append(process)
+                initial_x, initial_y = self._get_queue_position(len(self.ready_queue) + 5) # Place
+                initial_y = QUEUE_AREA_Y_START - 30 # Place
+                process.create_visual(initial_x, initial_y)
+                current_step_actions.append({'type': 'arrive', 'process': process})
+
+
+        cores_freed_this_step = []
+        processes_to_queue = []
+
+        for core in self.cores:
+            if core['state'] == 'Busy':
+                process = core['process']
+                if process: # Should
+                    if self.gantt_data and self.gantt_data[-1][0] == process.id and self.gantt_data[-1][1] == core['id'] and self.gantt_data[-1][3] == self.current_time :
+                         self.gantt_data[-1] = (process.id, core['id'], self.gantt_data[-1][2], self.current_time + 1)
+                    elif not self.gantt_data or self.gantt_data[-1][0] != process.id or self.gantt_data[-1][1] != core['id'] or self.gantt_data[-1][3] != self.current_time:
+                         self.gantt_data.append([process.id, core['id'], self.current_time, self.current_time + 1]) # Start
+
+                    process.remaining_burst_time -= 1
+                    process.time_on_core_current_quantum += 1
+
+                    if process.remaining_burst_time <= 0:
+                        process.state = "Terminated"
+                        process.completion_time = self.current_time + 1
+                        process.turnaround_time = process.completion_time - process.arrival_time
+                        self.terminated_processes.append(process)
+
+                        current_step_actions.append({'type': 'terminate', 'process': process, 'core_id': core['id']})
+                        cores_freed_this_step.append(core['id'])
+                        core['process'] = None # Clear
+
+
+                    elif process.time_on_core_current_quantum >= self.time_quantum:
+                        process.state = "Ready"
+                        process.time_on_core_current_quantum = 0 # Reset
+                        processes_to_queue.append(process) # Will
+
+                        current_step_actions.append({'type': 'return_to_queue', 'process': process, 'core_id': core['id']})
+                        cores_freed_this_step.append(core['id'])
+                        core['process'] = None # Clear
+
+        processes_assigned_this_step = []
+        idle_cores = [c for c in self.cores if c['state'] == 'Idle' or c['id'] in cores_freed_this_step]
+
+        while idle_cores and self.ready_queue:
+            core = idle_cores.pop(0)
+            process_to_run = self.ready_queue.popleft()
+
+            process_to_run.state = "Running"
+            process_to_run.current_core = core['id']
+            process_to_run.time_on_core_current_quantum = 0 # Start
+            if process_to_run.start_time == -1: # First
+                process_to_run.start_time = self.current_time
+
+            core['state'] = 'Busy' # Mark
+            core['process'] = process_to_run
+            processes_assigned_this_step.append({'process': process_to_run, 'core': core})
+
+            current_step_actions.append({'type': 'assign_to_core', 'process': process_to_run, 'core': core})
+
+        for process in processes_to_queue:
+             self.ready_queue.append(process)
+
+
+        for process in self.ready_queue:
+             if process.visual_id and QUEUE_AREA_Y_START < process.current_y < QUEUE_AREA_Y_START + QUEUE_AREA_HEIGHT + PROCESS_RADIUS*2 :
+                  process.waiting_time += 1
+
+
+        self.execute_animations(current_step_actions, cores_freed_this_step, processes_assigned_this_step)
+
+
+    def execute_animations(self, actions, freed_core_ids, assigned_actions_info):
+        """ Coordinates and executes the animations for the current time step."""
+
+        pending_animations = len(actions)
+        if not pending_animations: # If
+            self.proceed_to_next_step()
+            return
+
+        def on_animation_complete():
+            nonlocal pending_animations
+            pending_animations -= 1
+            if pending_animations == 0:
+                self.finalize_step_state(freed_core_ids, assigned_actions_info)
+                self.proceed_to_next_step()
+
+
+        arrival_actions = [a for a in actions if a['type'] == 'arrive']
+        assign_actions = [a for a in actions if a['type'] == 'assign_to_core']
+        return_actions = [a for a in actions if a['type'] == 'return_to_queue']
+        terminate_actions = [a for a in actions if a['type'] == 'terminate']
+
+        for action in terminate_actions:
+            process = action['process']
+            core_id = action['core_id']
+            process.destroy_visual()
+            core = next((c for c in self.cores if c['id'] == core_id), None)
+            if core:
+                 pass # Defer
+            on_animation_complete() # Termination
+
+
+        return_targets = [] # Store
+        for action in return_actions:
+            process = action['process']
+            core = next((c for c in self.cores if c['id'] == action['core_id']), None)
+            mid_queue_x = CANVAS_WIDTH / 2
+            mid_queue_y = QUEUE_AREA_Y_START + QUEUE_AREA_HEIGHT / 2
+            return_targets.append({'process': process, 'target_x': mid_queue_x, 'target_y': mid_queue_y})
+            self._animate_move(process, mid_queue_x, mid_queue_y, callback=on_animation_complete)
+
+
+        for action in assign_actions:
+            process = action['process']
+            core = action['core']
+            target_x, target_y = core['x'], core['y']
+            self._animate_move(process, target_x, target_y, callback=on_animation_complete)
+
+
+
+        arrivals_returns_pending = len(arrival_actions) + len(return_actions)
+        if arrivals_returns_pending == 0 and len(assign_actions) > 0: # Only
+             pass # Assign
+        elif arrivals_returns_pending == 0 and len(terminate_actions) > 0:
+             pass # Terminate
+        elif arrivals_returns_pending == 0: # No
+             pass # Already
+
+        def on_arrival_return_move_done():
+             nonlocal arrivals_returns_pending
+             arrivals_returns_pending -= 1
+             if arrivals_returns_pending == 0:
+                 animated_p = return_targets[0]['process'] if return_targets else None # Pass
+                 target_x = return_targets[0]['target_x'] if return_targets else None
+                 target_y = return_targets[0]['target_y'] if return_targets else None
+
+                 self._update_ready_queue_visuals(
+                     animated_process=animated_p,
+                     target_x=target_x,
+                     target_y=target_y,
+                     callback=None # The
+                 )
+
+        for action in arrival_actions:
+             process = action['process']
+             temp_q_x, temp_q_y = self._get_queue_position(len(self.ready_queue)-1) # Approximate
+             self._animate_move(process, temp_q_x, temp_q_y, callback=on_arrival_return_move_done)
+
+        for _ in return_actions:
+             on_arrival_return_move_done() # Decrement
