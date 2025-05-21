@@ -261,7 +261,7 @@ def _draw_simulation_areas(self):
                  'end_y': y_pos + core_box_height
              })
 
-    def tambah_process(self):
+    def add_process(self):
         """Adds a new process from the input fields."""
         if self.simulation_running:
              messagebox.showwarning("Warning", "Cannot add processes during simulation.")
@@ -285,7 +285,7 @@ def _draw_simulation_areas(self):
 
         except ValueError as e:
             messagebox.showerror("Input Error", f"Invalid input: {e}")
-    
+
     def update_speed(self, val):
         """Updates the animation speed factor from the scale."""
         self.animation_speed_factor = float(val)
@@ -482,3 +482,6 @@ def _draw_simulation_areas(self):
 
         for anim_info in processes_to_animate:
             self._animate_move(anim_info['process'], anim_info['target_x'], anim_info['target_y'], steps=max(3, ANIMATION_MOVE_STEPS // 2), callback=on_single_animation_done)
+
+
+   
