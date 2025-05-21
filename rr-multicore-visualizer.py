@@ -189,3 +189,74 @@ class RRSchedulerApp:
         self.results_label.pack(pady=5)
 
         self._update_core_display_on_change()
+
+
+def _draw_simulation_areas(self):
+        """Draws the static parts of the simulation area like core boxes and queue area."""
+        self.canvas.delete("areas") # Clear
+
+        self.canvas.create_text(10, CORE_AREA_Y_START - 15, text="CPU Cores:", anchor="w", font=("Arial", 12, "bold"), tags="areas")
+        self.canvas.create_rectangle(5, CORE_AREA_Y_START, CANVAS_WIDTH - 5, CORE_AREA_Y_START + CORE_AREA_HEIGHT, outline="gray", dash=(2, 2), tags="areas")
+
+        self.canvas.create_text(10, QUEUE_AREA_Y_START - 15, text="Ready Queue:", anchor="w", font=("Arial", 12, "bold"), tags="areas")
+        self.canvas.create_rectangle(5, QUEUE_AREA_Y_START, CANVAS_WIDTH - 5, QUEUE_AREA_Y_START + QUEUE_AREA_HEIGHT, outline="gray", dash=(2, 2), tags="areas")
+
+        self.gantt_y_start = QUEUE_AREA_Y_START + QUEUE_AREA_HEIGHT + 50
+        self.canvas.create_text(10, self.gantt_y_start - 15, text="Gantt Chart:", anchor="w", font=("Arial", 12, "bold"), tags="areas")
+
+        self._update_core_display()
+
+
+    def _update_core_display_on_change(self, event=None):
+        """Handles changes in the number of cores spinbox."""
+        if self.simulation_running:
+             messagebox.showwarning("Warning", "Cannot change core count during simulation. Reset first.")
+             self.num_cores_spinbox.delete(0, tk.END)
+             self.num_cores_spinbox.insert(0, str(self.num_cores)) # Revert
+             return
+        try:
+            self.num_cores = int(self.num_cores_spinbox.get())
+            if not 1 <= self.num_cores <= 8:
+                raise ValueError("Core count must be between 1 and 8.")
+            self._update_core_display()
+        except ValueError as e:
+            messagebox.showerror("Input Error", f"Invalid number of cores: {e}")
+            self.num_cores_spinbox.delete(0, tk.END)
+            self.num_cores_spinbox.insert(0, str(self.num_cores)) # Revert
+
+
+    def _update_core_display(self):
+         """Draws or redraws the core representations."""
+         self.canvas.delete("core_visual") # Clear
+
+         core_box_width = (CANVAS_WIDTH - 20) / self.num_cores
+         core_box_height = CORE_AREA_HEIGHT * 0.6
+         y_pos = CORE_AREA_Y_START + (CORE_AREA_HEIGHT - core_box_height) / 2
+
+         self.cores = [] # Reset
+
+         for i in range(self.num_cores):
+             x_start = 10 + i * core_box_width
+             x_end = x_start + core_box_width - 10 # Small
+             center_x = (x_start + x_end) / 2
+             center_y = y_pos + core_box_height / 2
+
+             core_id = self.canvas.create_rectangle(
+                 x_start, y_pos, x_end, y_pos + core_box_height,
+                 outline="blue", fill="lightblue", tags=("core_visual", f"core_{i}")
+             )
+             self.canvas.create_text(
+                 center_x, y_pos - 10, text=f"Core {i}", anchor="s", tags=("core_visual", f"core_text_{i}")
+             )
+             self.cores.append({
+                 'id': i,
+                 'state': 'Idle',
+                 'process': None,
+                 'visual_id': core_id,
+                 'x': center_x, # Target
+                 'y': center_y, # Target
+                 'start_x': x_start,
+                 'start_y': y_pos,
+                 'end_x': x_end,
+                 'end_y': y_pos + core_box_height
+             })
