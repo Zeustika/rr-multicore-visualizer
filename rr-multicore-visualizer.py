@@ -303,7 +303,7 @@ class RRSchedulerApp:
             self.pause_button.config(text="Resume")
         else:
             self.pause_button.config(text="Pause")
-            self.simulation_step()
+            self.simulasi_langkah()
 
     def reset_simulation(self):
         """Resets the simulation state and GUI."""
@@ -392,7 +392,7 @@ class RRSchedulerApp:
         self.time_quantum_spinbox.config(state=tk.DISABLED)
 
         self.animation_queue = collections.deque() # Queue
-        self.simulation_step()
+        self.simulasi_langkah()
 
 
     def _get_queue_position(self, index):
@@ -485,13 +485,13 @@ class RRSchedulerApp:
 
 
 
-    def simulation_step(self):
+    def simulasi_langkah(self):
         """Performs one time unit step of the simulation."""
         if not self.simulation_running:
             return
 
         if self.simulation_paused:
-            self.animation_id = self.master.after(200, self.simulation_step)
+            self.animation_id = self.master.after(200, self.simulasi_langkah)
             return
 
         current_step_actions = []
@@ -678,7 +678,7 @@ class RRSchedulerApp:
         self.current_time += 1
         self.time_label.config(text=f"Time: {self.current_time}")
 
-        self.animation_id = self.master.after(self.get_delay(), self.simulation_step)
+        self.animation_id = self.master.after(self.get_delay(), self.simulasi_langkah)
 
 
     def end_simulation(self):
