@@ -261,7 +261,7 @@ class RRSchedulerApp:
                  'end_y': y_pos + core_box_height
              })
 
-    def add_process(self):
+    def tambah_process(self):
         """Adds a new process from the input fields."""
         if self.simulation_running:
              messagebox.showwarning("Warning", "Cannot add processes during simulation.")
