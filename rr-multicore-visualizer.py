@@ -653,3 +653,133 @@ def _draw_simulation_areas(self):
 
         for _ in return_actions:
              on_arrival_return_move_done() # Decrement
+
+
+    def finalize_step_state(self, freed_core_ids, assigned_actions_info):
+        """Update core visual states after animations for the step are done."""
+        for core_id in freed_core_ids:
+            core = next((c for c in self.cores if c['id'] == core_id), None)
+            if core and core.get('process') is None: # Ensure
+                core['state'] = 'Idle'
+                self.canvas.itemconfig(core['visual_id'], fill="lightblue")
+
+        for assign_info in assigned_actions_info:
+            core = assign_info['core']
+            core['state'] = 'Busy' # Logical
+            self.canvas.itemconfig(core['visual_id'], fill="lightcoral")
+
+
+    def proceed_to_next_step(self):
+        """Checks if simulation is over and schedules the next step."""
+        if len(self.terminated_processes) == len(self.processes):
+            self.end_simulation()
+            return
+
+        self.current_time += 1
+        self.time_label.config(text=f"Time: {self.current_time}")
+
+        self.animation_id = self.master.after(self.get_delay(), self.simulation_step)
+
+
+    def end_simulation(self):
+        """Finalizes the simulation and displays results."""
+        self.simulation_running = False
+        self.pause_button.config(state=tk.DISABLED)
+        self.reset_button.config(state=tk.NORMAL) # Allow
+
+
+        messagebox.showinfo("Simulation Complete", f"Simulation finished at time {self.current_time}.")
+
+        total_waiting_time = 0
+        total_turnaround_time = 0
+        total_burst_time = 0
+        total_busy_time = 0 # Across
+
+        if not self.processes: return # Avoid
+
+        for p in self.terminated_processes:
+             p.turnaround_time = p.completion_time - p.arrival_time
+             p.waiting_time = p.turnaround_time - p.burst_time
+             total_waiting_time += p.waiting_time
+             total_turnaround_time += p.turnaround_time
+             total_burst_time += p.burst_time # Sum
+
+        avg_waiting_time = total_waiting_time / len(self.processes)
+        avg_turnaround_time = total_turnaround_time / len(self.processes)
+
+        for entry in self.gantt_data:
+            total_busy_time += (entry[3] - entry[2])
+
+        if self.current_time > 0 and self.num_cores > 0:
+             total_possible_time = self.current_time * self.num_cores
+             cpu_utilization = (total_busy_time / total_possible_time) * 100 if total_possible_time > 0 else 0
+        else:
+             cpu_utilization = 0
+
+
+        result_text = (
+            f"Average Waiting Time: {avg_waiting_time:.2f}\n"
+            f"Average Turnaround Time: {avg_turnaround_time:.2f}\n"
+            f"CPU Utilization: {cpu_utilization:.2f}%"
+        )
+        self.results_label.config(text=result_text)
+
+        self.draw_gantt_chart()
+
+
+    def draw_gantt_chart(self):
+        """Draws the Gantt chart on the canvas."""
+        self.canvas.delete("gantt") # Clear
+
+        if not self.gantt_data:
+            return
+
+        chart_x_start = 50
+        chart_y_start = self.gantt_y_start # Use
+        bar_height = 20
+        time_scale = 15 # Pixels
+        max_time = self.current_time
+        padding = 5
+
+        needed_width = chart_x_start + max_time * time_scale + 50
+        needed_height = chart_y_start + (self.num_cores + 1) * (bar_height + padding) # Add
+        current_scroll_region = list(map(int, self.canvas.cget("scrollregion").split()))
+        new_scroll_width = max(current_scroll_region[2], needed_width)
+        new_scroll_height = max(current_scroll_region[3], needed_height)
+        self.canvas.config(scrollregion=(0, 0, new_scroll_width, new_scroll_height))
+
+
+        self.canvas.create_line(chart_x_start, chart_y_start + (self.num_cores + 0.5) * (bar_height + padding) ,
+                                chart_x_start + max_time * time_scale, chart_y_start + (self.num_cores + 0.5) * (bar_height + padding),
+                                tags="gantt")
+        for t in range(max_time + 1):
+            x = chart_x_start + t * time_scale
+            self.canvas.create_line(x, chart_y_start + (self.num_cores + 0.5) * (bar_height + padding) - 3,
+                                    x, chart_y_start + (self.num_cores + 0.5) * (bar_height + padding) + 3, tags="gantt")
+            if t % 5 == 0 or t == max_time: # Label
+                 self.canvas.create_text(x, chart_y_start + (self.num_cores + 0.5) * (bar_height + padding) + 10, text=str(t), anchor="n", tags="gantt")
+
+
+        process_map = {p.id: p for p in self.processes} # Map
+
+        for core_id in range(self.num_cores):
+            y = chart_y_start + core_id * (bar_height + padding)
+            self.canvas.create_text(chart_x_start - 10, y + bar_height / 2, text=f"C{core_id}", anchor="e", tags="gantt")
+
+            core_gantt_data = sorted([g for g in self.gantt_data if g[1] == core_id], key=lambda x: x[2]) # Sort
+
+            for entry in core_gantt_data:
+                p_id, _, start, end = entry
+                process = process_map.get(p_id)
+                color = process.color if process else "gray" # Fallback
+
+                x1 = chart_x_start + start * time_scale
+                x2 = chart_x_start + end * time_scale
+                self.canvas.create_rectangle(x1, y, x2, y + bar_height, fill=color, outline="black", tags="gantt")
+                if (x2 - x1) > 15: # Only
+                    self.canvas.create_text((x1 + x2) / 2, y + bar_height / 2, text=f"P{p_id}", fill="white", tags="gantt", font=("Arial", 8))
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = RRSchedulerApp(root)
+    root.mainloop()
